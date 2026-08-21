@@ -2,6 +2,7 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, UploadFile, File, Form, Body, HTTPException, Depends
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -13,6 +14,8 @@ from .queue import publish_job, publish_submit
 STORAGE_DIR = os.environ["STORAGE_DIR"]
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 SUBMITTABLE_STATUSES = {"verified", "needs_review"}
+ACCOUNTING_API_URL = os.environ["ACCOUNTING_API_URL"]
+ACCOUNTING_API_KEY = os.environ["ACCOUNTING_API_KEY"]
 
 
 @asynccontextmanager
@@ -113,6 +116,20 @@ def submit_job(job_id: str, body: dict = Body(default={}), db: Session = Depends
     publish_submit(job_id, payload_override)
 
     return {"job_id": job_id, "status": "submitting"}
+
+
+@app.get("/api/partners")
+def partners():
+    """Passthrough to the accounting system's partner master, so the review
+    form can offer a dropdown instead of a free-text supplier field."""
+    resp = httpx.get(f"{ACCOUNTING_API_URL}/partners", headers={"X-API-Key": ACCOUNTING_API_KEY}, timeout=10)
+    return resp.json()["data"]["partners"]
+
+
+@app.get("/api/tax-codes")
+def tax_codes():
+    resp = httpx.get(f"{ACCOUNTING_API_URL}/tax-codes", headers={"X-API-Key": ACCOUNTING_API_KEY}, timeout=10)
+    return resp.json()["data"]["tax_codes"]
 
 
 @app.get("/")

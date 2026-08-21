@@ -4,13 +4,14 @@
 <meta charset="utf-8">
 <title>Invoice Intake</title>
 <style>
-  body { font-family: -apple-system, sans-serif; max-width: 800px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
+  body { font-family: -apple-system, sans-serif; max-width: 900px; margin: 3rem auto; padding: 0 1rem; color: #1a1a1a; }
   h1 { font-size: 1.3rem; }
   h2 { font-size: 1.05rem; margin-top: 1.5rem; }
   .row { display: flex; gap: 0.75rem; align-items: center; }
   label { font-size: 0.9rem; }
   button { cursor: pointer; padding: 6px 14px; border-radius: 4px; border: 1px solid #999; background: white; }
   button:hover { background: #f0f0f0; }
+  button.secondary { border-color: #ccc; font-size: 0.8rem; padding: 3px 8px; }
   #status { margin-top: 1.5rem; }
   .status { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
   .status-done { background: #d4f4dd; color: #16642e; }
@@ -20,10 +21,21 @@
   .status-queued, .status-extracting, .status-hydrating, .status-verifying, .status-registering, .status-submitting { background: #eee; color: #555; }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #ccc; border-top-color: #555; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -1px; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  textarea { width: 100%; height: 220px; font-family: monospace; font-size: 0.8rem; box-sizing: border-box; }
   .issues { background: #fff2cc; border-radius: 4px; padding: 0.5rem 0.8rem; margin: 0.5rem 0; }
   .issues li { font-size: 0.85rem; }
   a { color: #1a4d99; }
+
+  form.review { display: flex; flex-direction: column; gap: 0.9rem; }
+  .field-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.7rem; }
+  .field { display: flex; flex-direction: column; gap: 2px; }
+  .field label { font-size: 0.75rem; color: #555; }
+  .field input, .field select { padding: 4px 6px; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 4px; }
+
+  table.lines { width: 100%; border-collapse: collapse; }
+  table.lines th { text-align: left; font-size: 0.75rem; color: #555; font-weight: 500; padding: 2px 4px; }
+  table.lines td { padding: 2px 4px; }
+  table.lines input, table.lines select { width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 0.85rem; border: 1px solid #ccc; border-radius: 4px; }
+  table.lines input.amount, table.lines input.qty, table.lines input.price { text-align: right; }
 </style>
 </head>
 <body>
@@ -43,6 +55,13 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let pollTimer = null;
+let partnersCache = null;
+let taxCodesCache = null;
+
+async function loadReferenceData() {
+  if (!partnersCache) partnersCache = await (await fetch('/api/partners')).json();
+  if (!taxCodesCache) taxCodesCache = await (await fetch('/api/tax-codes')).json();
+}
 
 async function upload() {
   const f = $('file').files[0];
@@ -97,17 +116,114 @@ function pollJob(jobId) {
   pollTimer = setInterval(tick, 1200);
 }
 
-function renderReview(job) {
-  const payload = job.verification?.payload || job.hydration?.payload || null;
+function optionsHtml(options, selected) {
+  return options.map(o => `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`).join('');
+}
+
+function lineRowHtml(line, taxCodeOptions) {
+  const l = line || { description: '', quantity: null, unit: '', unit_price: null, amount: 0, tax_code: taxCodeOptions[0]?.value };
+  return `
+    <tr>
+      <td><input type="text" class="description" value="${l.description ?? ''}"></td>
+      <td><input type="number" class="qty" value="${l.quantity ?? ''}" placeholder="—"></td>
+      <td><input type="text" class="unit" value="${l.unit ?? ''}"></td>
+      <td><input type="number" class="price" value="${l.unit_price ?? ''}" placeholder="—"></td>
+      <td><input type="number" class="amount" value="${l.amount ?? 0}"></td>
+      <td><select class="tax_code">${optionsHtml(taxCodeOptions, l.tax_code)}</select></td>
+      <td><button type="button" class="secondary" onclick="this.closest('tr').remove()">remove</button></td>
+    </tr>
+  `;
+}
+
+async function renderReview(job) {
+  await loadReferenceData();
+
+  const payload = job.verification?.payload || job.hydration?.payload || {
+    partner_code: null, invoice_number: '', issue_date: '', due_date: '',
+    currency: 'JPY', lines: [], subtotal: 0, tax_amount: 0, total_amount: 0,
+  };
   const issues = job.verification?.issues || job.hydration?.issues || [];
+
+  const partnerOptions = [{ value: '', label: '(unresolved -- pick one)' },
+    ...partnersCache.map(p => ({ value: p.partner_code, label: `${p.name} (${p.partner_code})` }))];
+  const taxCodeOptions = taxCodesCache.map(t => ({ value: t.tax_code, label: `${t.tax_code} (${t.label})` }));
 
   $('status').innerHTML = `
     <h2>${job.filename} <span class="status status-${job.status}">${job.status}</span></h2>
     ${issuesList(issues)}
-    <p>Review / correct the payload below, then submit:</p>
-    <textarea id="payloadEditor">${JSON.stringify(payload, null, 2)}</textarea>
-    <p><button onclick="submitJob('${job.id}')">Submit to accounting system</button></p>
+    <form class="review" onsubmit="return false">
+      <div class="field-grid">
+        <div class="field"><label>Partner</label>
+          <select id="f_partner_code">${optionsHtml(partnerOptions, payload.partner_code)}</select>
+        </div>
+        <div class="field"><label>Invoice number</label>
+          <input type="text" id="f_invoice_number" value="${payload.invoice_number ?? ''}">
+        </div>
+        <div class="field"></div>
+        <div class="field"><label>Issue date</label>
+          <input type="date" id="f_issue_date" value="${payload.issue_date ?? ''}">
+        </div>
+        <div class="field"><label>Due date</label>
+          <input type="date" id="f_due_date" value="${payload.due_date ?? ''}">
+        </div>
+        <div class="field"></div>
+      </div>
+
+      <table class="lines">
+        <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th>Unit price</th><th>Amount</th><th>Tax</th><th></th></tr></thead>
+        <tbody id="lineRows">${payload.lines.map(l => lineRowHtml(l, taxCodeOptions)).join('')}</tbody>
+      </table>
+      <button type="button" class="secondary" onclick="addLineRow()">+ add line</button>
+
+      <div class="field-grid">
+        <div class="field"><label>Subtotal</label>
+          <input type="number" id="f_subtotal" value="${payload.subtotal ?? 0}">
+        </div>
+        <div class="field"><label>Tax amount</label>
+          <input type="number" id="f_tax_amount" value="${payload.tax_amount ?? 0}">
+        </div>
+        <div class="field"><label>Total amount</label>
+          <input type="number" id="f_total_amount" value="${payload.total_amount ?? 0}">
+        </div>
+      </div>
+
+      <p><button onclick="submitJob('${job.id}')">Submit to accounting system</button></p>
+    </form>
   `;
+
+  window._taxCodeOptions = taxCodeOptions;
+}
+
+function addLineRow() {
+  $('lineRows').insertAdjacentHTML('beforeend', lineRowHtml(null, window._taxCodeOptions));
+}
+
+function num(el) {
+  const v = el.value.trim();
+  return v === '' ? null : Number(v);
+}
+
+function collectPayload() {
+  const lines = [...document.querySelectorAll('#lineRows tr')].map(tr => ({
+    description: tr.querySelector('.description').value,
+    quantity: num(tr.querySelector('.qty')),
+    unit: tr.querySelector('.unit').value,
+    unit_price: num(tr.querySelector('.price')),
+    amount: num(tr.querySelector('.amount')) ?? 0,
+    tax_code: tr.querySelector('.tax_code').value,
+  }));
+
+  return {
+    partner_code: $('f_partner_code').value,
+    invoice_number: $('f_invoice_number').value,
+    issue_date: $('f_issue_date').value,
+    due_date: $('f_due_date').value,
+    currency: 'JPY',
+    lines,
+    subtotal: num($('f_subtotal')) ?? 0,
+    tax_amount: num($('f_tax_amount')) ?? 0,
+    total_amount: num($('f_total_amount')) ?? 0,
+  };
 }
 
 function renderResult(job) {
@@ -120,11 +236,9 @@ function renderResult(job) {
 }
 
 async function submitJob(jobId) {
-  let payload;
-  try {
-    payload = JSON.parse($('payloadEditor').value);
-  } catch (e) {
-    alert('Invalid JSON: ' + e.message);
+  const payload = collectPayload();
+  if (!payload.partner_code) {
+    alert('Please select a partner.');
     return;
   }
   $('status').innerHTML = `<p><span class="spinner"></span>submitting...</p>`;
