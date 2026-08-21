@@ -60,5 +60,11 @@ def verify(payload: dict, hydration_issues: list[dict], db_session) -> dict:
 
 
 def register(payload: dict) -> dict:
-    """API-shaped payload -> {"success": bool, "data": ..., "error": ...}"""
-    raise NotImplementedError
+    """API-shaped payload -> {"success": bool, "data": ..., "error": ...}
+
+    Thin wrapper over POST /invoices. All the "should this be submitted"
+    decisions already happened in verify() -- this just submits and passes
+    the accounting API's own response through, since it's the final
+    authority (it independently recomputes amounts and duplicate status).
+    """
+    return accounting_client.register_invoice(payload)
