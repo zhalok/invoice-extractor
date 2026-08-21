@@ -8,6 +8,7 @@ import accounting_client
 import hydrate as hydrate_module
 import llm_client
 import ocr_client
+import verify as verify_module
 
 PDF_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
@@ -55,7 +56,7 @@ def verify(payload: dict, hydration_issues: list[dict], db_session) -> dict:
     `payload` is only returned when ok -- everything resolved, math
     reconciles, and no duplicate found locally.
     """
-    raise NotImplementedError
+    return verify_module.verify(payload, hydration_issues, db_session)
 
 
 def register(payload: dict) -> dict:

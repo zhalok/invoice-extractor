@@ -21,6 +21,12 @@ def get_tax_codes() -> list[dict]:
     return resp.json()["data"]["tax_codes"]
 
 
+def get_invoices() -> list[dict]:
+    resp = httpx.get(f"{BASE_URL}/invoices", headers=HEADERS, timeout=10)
+    resp.raise_for_status()
+    return resp.json()["data"]["invoices"]
+
+
 def register_invoice(payload: dict) -> dict:
     resp = httpx.post(f"{BASE_URL}/invoices", headers=HEADERS, json=payload, timeout=10)
     return resp.json()
