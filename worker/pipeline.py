@@ -23,18 +23,16 @@ def extract(storage_path: str, original_filename: str) -> dict:
     for now, returning hand-transcribed data for the 12 sample invoices,
     but the call site here is where a real LLM/OCR integration plugs in.
     """
-    # ext = os.path.splitext(original_filename)[1].lower()
+    ext = os.path.splitext(original_filename)[1].lower()
 
-    # with open(storage_path, "rb") as f:
-    #     file_bytes = f.read()
+    with open(storage_path, "rb") as f:
+        file_bytes = f.read()
 
-    # if ext in PDF_EXTENSIONS:
-    #     return llm_client.extract_from_pdf(file_bytes, original_filename)
-    # if ext in IMAGE_EXTENSIONS:
-    #     return ocr_client.extract_from_image(file_bytes, original_filename)
-    # raise UnsupportedFileType(f"No extraction route for file type {ext!r}")
-    raise NotImplementedError
-
+    if ext in PDF_EXTENSIONS:
+        return llm_client.extract_from_pdf(file_bytes, original_filename)
+    if ext in IMAGE_EXTENSIONS:
+        return ocr_client.extract_from_image(file_bytes, original_filename)
+    raise UnsupportedFileType(f"No extraction route for file type {ext!r}")
 
 
 def verify(extracted: dict, db_session) -> dict:
