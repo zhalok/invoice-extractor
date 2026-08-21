@@ -28,8 +28,7 @@ services:
 
   accounting-api:
     build:
-      context: .
-      dockerfile: accounting-api.Dockerfile
+      context: ./accounting-api
     ports:
       - "8080:8080"
 
