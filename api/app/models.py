@@ -22,10 +22,11 @@ class Job(Base):
     filename = Column(String, nullable=False)
     storage_path = Column(String, nullable=False)
 
-    # queued -> extracting -> verifying -> (needs_review | registering) -> (done | failed)
+    # queued -> extracting -> hydrating -> verifying -> (needs_review | registering) -> (done | failed)
     status = Column(String, nullable=False, default="queued")
 
     extracted = Column(JSONB, nullable=True)
+    hydration = Column(JSONB, nullable=True)
     verification = Column(JSONB, nullable=True)
     registration = Column(JSONB, nullable=True)
     error = Column(Text, nullable=True)
@@ -39,6 +40,7 @@ class Job(Base):
             "filename": self.filename,
             "status": self.status,
             "extracted": self.extracted,
+            "hydration": self.hydration,
             "verification": self.verification,
             "registration": self.registration,
             "error": self.error,

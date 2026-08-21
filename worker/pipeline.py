@@ -1,9 +1,11 @@
 """
-Pipeline stages: extract -> verify -> register.
+Pipeline stages: extract -> hydrate -> verify -> register.
 """
 
 import os
 
+import accounting_client
+import hydrate as hydrate_module
 import llm_client
 import ocr_client
 
@@ -35,11 +37,23 @@ def extract(storage_path: str, original_filename: str) -> dict:
     raise UnsupportedFileType(f"No extraction route for file type {ext!r}")
 
 
-def verify(extracted: dict, db_session) -> dict:
-    """extraction -> {"ok": bool, "issues": [...], "payload": {...} | None}
+def hydrate(extracted: dict) -> tuple[dict, list[dict]]:
+    """structured extraction -> (draft API payload, unresolved issues).
 
-    `payload` is the API-shaped body (partner_code resolved, tax_code per
-    line, YYYY-MM-DD dates) ready for POST /invoices, present only when ok.
+    Resolves supplier name -> partner_code, tax rate % -> tax_code, and
+    Japanese date formats -> YYYY-MM-DD against the accounting API's own
+    reference data (GET /partners). Never rejects anything itself -- it
+    just reports what it couldn't map; verify() decides what's fatal.
+    """
+    partners = accounting_client.get_partners()
+    return hydrate_module.hydrate(extracted, partners)
+
+
+def verify(payload: dict, hydration_issues: list[dict], db_session) -> dict:
+    """draft payload -> {"ok": bool, "issues": [...], "payload": {...} | None}
+
+    `payload` is only returned when ok -- everything resolved, math
+    reconciles, and no duplicate found locally.
     """
     raise NotImplementedError
 

@@ -33,9 +33,13 @@ def process_job(job_id: str) -> None:
 
         _set_status(db, job, "extracting")
         extracted = pipeline.extract(job.storage_path, job.filename)
-        _set_status(db, job, "verifying", extracted=extracted)
+        _set_status(db, job, "hydrating", extracted=extracted)
 
-        verification = pipeline.verify(extracted, db)
+        draft_payload, hydration_issues = pipeline.hydrate(extracted)
+        hydration = {"payload": draft_payload, "issues": hydration_issues}
+        _set_status(db, job, "verifying", hydration=hydration)
+
+        verification = pipeline.verify(draft_payload, hydration_issues, db)
         if not verification["ok"]:
             _set_status(db, job, "needs_review", verification=verification)
             print(f"     needs_review: {verification['issues']}")

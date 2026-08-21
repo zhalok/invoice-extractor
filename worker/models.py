@@ -25,6 +25,7 @@ class Job(Base):
     status = Column(String, nullable=False, default="queued")
 
     extracted = Column(JSONB, nullable=True)
+    hydration = Column(JSONB, nullable=True)
     verification = Column(JSONB, nullable=True)
     registration = Column(JSONB, nullable=True)
     error = Column(Text, nullable=True)
