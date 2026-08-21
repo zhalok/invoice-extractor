@@ -39,6 +39,8 @@ services:
       DATABASE_URL: postgresql+psycopg://invoices:invoices@postgres:5432/invoices
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
       STORAGE_DIR: /storage
+      ACCOUNTING_API_URL: http://accounting-api:8080
+      ACCOUNTING_API_KEY: demo-key-1234
     ports:
       - "8000:8000"
     volumes:
@@ -48,6 +50,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      accounting-api:
+        condition: service_started
 
   worker:
     build:
