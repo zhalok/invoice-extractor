@@ -1,0 +1,74 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: invoices
+      POSTGRES_PASSWORD: invoices
+      POSTGRES_DB: invoices
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U invoices"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  accounting-api:
+    build:
+      context: .
+      dockerfile: accounting-api.Dockerfile
+    ports:
+      - "8080:8080"
+
+  api:
+    build:
+      context: ./api
+    environment:
+      DATABASE_URL: postgresql+psycopg://invoices:invoices@postgres:5432/invoices
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      STORAGE_DIR: /storage
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql+psycopg://invoices:invoices@postgres:5432/invoices
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      STORAGE_DIR: /storage
+      ACCOUNTING_API_URL: http://accounting-api:8080
+      ACCOUNTING_API_KEY: demo-key-1234
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./storage:/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      accounting-api:
+        condition: service_started
+
+volumes:
+  pgdata:
