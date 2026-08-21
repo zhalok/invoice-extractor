@@ -21,7 +21,17 @@ def _set_status(db: Session, job: Job, status: str, **fields) -> None:
     db.commit()
 
 
+def _do_register(db: Session, job: Job, payload: dict) -> None:
+    _set_status(db, job, "registering")
+    result = pipeline.register(payload)
+    final_status = "done" if result["success"] else "failed"
+    _set_status(db, job, final_status, registration=result)
+    print(f"     {final_status}")
+
+
 def process_job(job_id: str) -> None:
+    """Full pipeline: extract -> hydrate -> verify -> (register, if
+    auto_submit and verification passed)."""
     db = SessionLocal()
     try:
         job = db.get(Job, job_id)
@@ -29,7 +39,7 @@ def process_job(job_id: str) -> None:
             print(f"  ! job {job_id} not found, skipping")
             return
 
-        print(f"  -> processing {job_id} ({job.filename})")
+        print(f"  -> processing {job_id} ({job.filename}, auto_submit={job.auto_submit})")
 
         _set_status(db, job, "extracting")
         extracted = pipeline.extract(job.storage_path, job.filename)
@@ -45,13 +55,44 @@ def process_job(job_id: str) -> None:
             print(f"     needs_review: {verification['issues']}")
             return
 
-        _set_status(db, job, "registering", verification=verification)
-        result = pipeline.register(verification["payload"])
-        final_status = "done" if result["success"] else "failed"
-        _set_status(db, job, final_status, registration=result)
-        print(f"     {final_status}")
+        if not job.auto_submit:
+            _set_status(db, job, "verified", verification=verification)
+            print("     verified, waiting for human submit")
+            return
+
+        job.verification = verification
+        _do_register(db, job, verification["payload"])
 
     except Exception as exc:  # noqa: BLE001 - report the failure on the job, don't crash the worker
+        db.rollback()
+        job = db.get(Job, job_id)
+        if job is not None:
+            _set_status(db, job, "failed", error=str(exc))
+        print(f"     ! unexpected error: {exc}")
+    finally:
+        db.close()
+
+
+def submit_job(job_id: str, payload_override: dict | None) -> None:
+    """Human (or auto_submit) approved a verified/needs_review job -> register it."""
+    db = SessionLocal()
+    try:
+        job = db.get(Job, job_id)
+        if job is None:
+            print(f"  ! job {job_id} not found, skipping")
+            return
+
+        print(f"  -> submitting {job_id} ({job.filename})")
+
+        payload = payload_override or (job.verification or {}).get("payload")
+        if payload is None:
+            _set_status(db, job, "failed", error="No payload available to submit")
+            print("     ! no payload available to submit")
+            return
+
+        _do_register(db, job, payload)
+
+    except Exception as exc:  # noqa: BLE001
         db.rollback()
         job = db.get(Job, job_id)
         if job is not None:
@@ -89,8 +130,11 @@ def main() -> None:
     channel.basic_qos(prefetch_count=1)
 
     def on_message(ch, method, properties, body):
-        payload = json.loads(body)
-        process_job(payload["job_id"])
+        message = json.loads(body)
+        if message.get("type") == "submit":
+            submit_job(message["job_id"], message.get("payload_override"))
+        else:
+            process_job(message["job_id"])
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
     channel.basic_consume(queue=QUEUE_NAME, on_message_callback=on_message)

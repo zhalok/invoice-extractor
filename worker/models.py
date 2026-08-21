@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy import Column, String, Text, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from db import Base
@@ -23,6 +23,7 @@ class Job(Base):
     storage_path = Column(String, nullable=False)
 
     status = Column(String, nullable=False, default="queued")
+    auto_submit = Column(Boolean, nullable=False, default=False)
 
     extracted = Column(JSONB, nullable=True)
     hydration = Column(JSONB, nullable=True)

@@ -2,15 +2,16 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form, Body, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from .db import Base, engine, get_db
 from .models import Job
-from .queue import publish_job
+from .queue import publish_job, publish_submit
 
 STORAGE_DIR = os.environ["STORAGE_DIR"]
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+SUBMITTABLE_STATUSES = {"verified", "needs_review"}
 
 
 @asynccontextmanager
@@ -29,7 +30,20 @@ def health():
 
 
 @app.post("/jobs", status_code=202)
-async def create_job(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def create_job(
+    file: UploadFile = File(...),
+    auto_submit: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    """Upload an invoice for processing.
+
+    auto_submit=false (default): the pipeline stops at `verified` (or
+    `needs_review`) and waits for a human to call POST /jobs/{id}/submit
+    after reviewing the extracted fields.
+    auto_submit=true: a verified job is registered immediately with no
+    human in the loop; needs_review jobs still stop and wait, since there's
+    nothing to auto-submit until someone resolves the issue.
+    """
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(422, f"Unsupported file type: {ext or '(none)'}")
@@ -40,13 +54,19 @@ async def create_job(file: UploadFile = File(...), db: Session = Depends(get_db)
     with open(storage_path, "wb") as f:
         f.write(contents)
 
-    job = Job(id=job_id, filename=file.filename, storage_path=storage_path, status="queued")
+    job = Job(
+        id=job_id,
+        filename=file.filename,
+        storage_path=storage_path,
+        status="queued",
+        auto_submit=auto_submit,
+    )
     db.add(job)
     db.commit()
 
     publish_job(job_id)
 
-    return {"job_id": job_id, "status": "queued"}
+    return {"job_id": job_id, "status": "queued", "auto_submit": auto_submit}
 
 
 @app.get("/jobs/{job_id}")
@@ -61,3 +81,33 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
 def list_jobs(db: Session = Depends(get_db)):
     jobs = db.query(Job).order_by(Job.created_at.desc()).all()
     return [j.as_dict() for j in jobs]
+
+
+@app.post("/jobs/{job_id}/submit", status_code=202)
+def submit_job(job_id: str, body: dict = Body(default={}), db: Session = Depends(get_db)):
+    """Human-in-the-loop submission, after reviewing (and optionally
+    correcting) the extracted fields in the UI.
+
+    body: {"payload": {...}} -- the API-shaped invoice payload to
+    register. Optional when the job is `verified` (falls back to the
+    payload verify() already produced); required when the job is
+    `needs_review`, since there is no auto-produced payload to fall back
+    to -- the human's corrections are the only source for one.
+    """
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    if job.status not in SUBMITTABLE_STATUSES:
+        raise HTTPException(409, f"Job status is {job.status!r}, must be one of {sorted(SUBMITTABLE_STATUSES)}")
+
+    payload_override = body.get("payload")
+    if job.status == "needs_review" and payload_override is None:
+        raise HTTPException(422, "A corrected 'payload' is required to submit a needs_review job")
+
+    job.status = "submitting"
+    db.add(job)
+    db.commit()
+
+    publish_submit(job_id, payload_override)
+
+    return {"job_id": job_id, "status": "submitting"}

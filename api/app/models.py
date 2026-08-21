@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy import Column, String, Text, DateTime, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from .db import Base
@@ -22,8 +22,12 @@ class Job(Base):
     filename = Column(String, nullable=False)
     storage_path = Column(String, nullable=False)
 
-    # queued -> extracting -> hydrating -> verifying -> (needs_review | registering) -> (done | failed)
+    # queued -> extracting -> hydrating -> verifying
+    #   -> needs_review (blocking issues, needs a human-supplied payload to submit)
+    #   -> verified (auto_submit=false: waits for POST /jobs/{id}/submit)
+    #   -> registering -> (done | failed)
     status = Column(String, nullable=False, default="queued")
+    auto_submit = Column(Boolean, nullable=False, default=False)
 
     extracted = Column(JSONB, nullable=True)
     hydration = Column(JSONB, nullable=True)
@@ -39,6 +43,7 @@ class Job(Base):
             "id": self.id,
             "filename": self.filename,
             "status": self.status,
+            "auto_submit": self.auto_submit,
             "extracted": self.extracted,
             "hydration": self.hydration,
             "verification": self.verification,
