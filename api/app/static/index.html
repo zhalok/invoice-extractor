@@ -25,6 +25,12 @@
   .issues li { font-size: 0.85rem; }
   a { color: #1a4d99; }
 
+  .result-box { border-radius: 6px; padding: 0.8rem 1rem; margin-top: 0.5rem; }
+  .result-box p { margin: 0.2rem 0; font-size: 0.9rem; }
+  .result-ok { background: #d4f4dd; color: #16642e; }
+  .result-error { background: #fddede; color: #9c1c1c; }
+  .result-box code { background: rgba(0,0,0,0.08); padding: 1px 5px; border-radius: 3px; }
+
   form.review { display: flex; flex-direction: column; gap: 0.9rem; }
   .field-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.7rem; }
   .field { display: flex; flex-direction: column; gap: 2px; }
@@ -226,12 +232,37 @@ function collectPayload() {
   };
 }
 
+function yen(amount) {
+  return amount == null ? '' : `¥${Number(amount).toLocaleString('en-US')}`;
+}
+
+function registrationSummary(job) {
+  const reg = job.registration;
+  if (!reg) return job.error ? `<div class="result-box result-error"><p>${job.error}</p></div>` : '';
+
+  if (reg.success) {
+    const d = reg.data;
+    return `
+      <div class="result-box result-ok">
+        <p><strong>Registered successfully</strong> as <code>${d.accounting_id}</code></p>
+        <p>${d.invoice_number} &middot; ${yen(d.total_amount)} &middot; due ${d.due_date}</p>
+      </div>
+    `;
+  }
+
+  const err = reg.error || {};
+  return `
+    <div class="result-box result-error">
+      <p><strong>Registration failed</strong> &mdash; ${err.code || 'ERROR'}</p>
+      <p>${err.message || 'The accounting system rejected this invoice.'}</p>
+    </div>
+  `;
+}
+
 function renderResult(job) {
-  const registration = job.registration ? JSON.stringify(job.registration, null, 2) : null;
   $('status').innerHTML = `
     <h2>${job.filename} <span class="status status-${job.status}">${job.status}</span></h2>
-    ${job.error ? `<p>${job.error}</p>` : ''}
-    ${registration ? `<pre>${registration}</pre>` : ''}
+    ${registrationSummary(job)}
   `;
 }
 
