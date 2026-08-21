@@ -3,6 +3,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, Form, Body, HTTPException, Depends
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from .db import Base, engine, get_db
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Invoice Intake API", lifespan=lifespan)
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 @app.get("/health")
@@ -29,7 +31,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/jobs", status_code=202)
+@app.post("/api/jobs", status_code=202)
 async def create_job(
     file: UploadFile = File(...),
     auto_submit: bool = Form(False),
@@ -69,7 +71,7 @@ async def create_job(
     return {"job_id": job_id, "status": "queued", "auto_submit": auto_submit}
 
 
-@app.get("/jobs/{job_id}")
+@app.get("/api/jobs/{job_id}")
 def get_job(job_id: str, db: Session = Depends(get_db)):
     job = db.get(Job, job_id)
     if job is None:
@@ -77,13 +79,13 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     return job.as_dict()
 
 
-@app.get("/jobs")
+@app.get("/api/jobs")
 def list_jobs(db: Session = Depends(get_db)):
     jobs = db.query(Job).order_by(Job.created_at.desc()).all()
     return [j.as_dict() for j in jobs]
 
 
-@app.post("/jobs/{job_id}/submit", status_code=202)
+@app.post("/api/jobs/{job_id}/submit", status_code=202)
 def submit_job(job_id: str, body: dict = Body(default={}), db: Session = Depends(get_db)):
     """Human-in-the-loop submission, after reviewing (and optionally
     correcting) the extracted fields in the UI.
@@ -111,3 +113,13 @@ def submit_job(job_id: str, body: dict = Body(default={}), db: Session = Depends
     publish_submit(job_id, payload_override)
 
     return {"job_id": job_id, "status": "submitting"}
+
+
+@app.get("/")
+def upload_page():
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+
+@app.get("/jobs")
+def jobs_page():
+    return FileResponse(os.path.join(STATIC_DIR, "jobs.html"))

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jobs</title>
+<style>
+  body { font-family: -apple-system, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.3rem; }
+  h2 { font-size: 1.05rem; margin-top: 2rem; }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #ddd; font-size: 0.9rem; }
+  tr:hover { background: #f7f7f7; cursor: pointer; }
+  .status { padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+  .status-done { background: #d4f4dd; color: #16642e; }
+  .status-failed { background: #fddede; color: #9c1c1c; }
+  .status-needs_review { background: #fff2cc; color: #8a6300; }
+  .status-verified { background: #dbe9ff; color: #1a4d99; }
+  .status-queued, .status-extracting, .status-hydrating, .status-verifying, .status-registering, .status-submitting { background: #eee; color: #555; }
+  #detail { border: 1px solid #ddd; border-radius: 6px; padding: 1rem; margin-top: 1rem; display: none; }
+  textarea { width: 100%; height: 220px; font-family: monospace; font-size: 0.8rem; box-sizing: border-box; }
+  .issues { background: #fff2cc; border-radius: 4px; padding: 0.5rem 0.8rem; margin: 0.5rem 0; }
+  .issues li { font-size: 0.85rem; }
+  button { cursor: pointer; padding: 6px 14px; border-radius: 4px; border: 1px solid #999; background: white; }
+  button:hover { background: #f0f0f0; }
+  #msg { font-size: 0.85rem; color: #555; min-height: 1.2em; }
+  a { color: #1a4d99; }
+</style>
+</head>
+<body>
+
+<h1>Jobs</h1>
+<p><a href="/">&larr; Upload another invoice</a></p>
+<p id="msg"></p>
+
+<table>
+  <thead><tr><th>File</th><th>Status</th><th>Auto</th><th>Created</th></tr></thead>
+  <tbody id="jobs"></tbody>
+</table>
+
+<div id="detail"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function refresh() {
+  const resp = await fetch('/api/jobs');
+  const jobs = await resp.json();
+  const tbody = $('jobs');
+  tbody.innerHTML = '';
+  for (const job of jobs) {
+    const tr = document.createElement('tr');
+    tr.onclick = () => showDetail(job.id);
+    tr.innerHTML = `
+      <td>${job.filename}</td>
+      <td><span class="status status-${job.status}">${job.status}</span></td>
+      <td>${job.auto_submit ? 'yes' : 'no'}</td>
+      <td>${new Date(job.created_at).toLocaleString()}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function issuesList(issues) {
+  if (!issues || issues.length === 0) return '';
+  return `<div class="issues"><strong>Issues:</strong><ul>${issues.map(i => `<li>${i.code}: ${i.message}</li>`).join('')}</ul></div>`;
+}
+
+async function showDetail(jobId) {
+  const resp = await fetch(`/api/jobs/${jobId}`);
+  const job = await resp.json();
+  const div = $('detail');
+  div.style.display = 'block';
+
+  const payload = job.verification?.payload || job.hydration?.payload || null;
+  const issues = job.verification?.issues || job.hydration?.issues || [];
+  const canSubmit = job.status === 'verified' || job.status === 'needs_review';
+  const registration = job.registration ? JSON.stringify(job.registration, null, 2) : null;
+
+  div.innerHTML = `
+    <h2>${job.filename} <span class="status status-${job.status}">${job.status}</span></h2>
+    ${issuesList(issues)}
+    ${canSubmit ? `
+      <p>Review / correct the payload below, then submit:</p>
+      <textarea id="payloadEditor">${JSON.stringify(payload, null, 2)}</textarea>
+      <p><button onclick="submitJob('${job.id}')">Submit to accounting system</button></p>
+    ` : ''}
+    ${registration ? `<h3>Registration result</h3><pre>${registration}</pre>` : ''}
+    <details><summary>Raw extraction</summary><pre>${JSON.stringify(job.extracted, null, 2)}</pre></details>
+  `;
+}
+
+async function submitJob(jobId) {
+  let payload;
+  try {
+    payload = JSON.parse($('payloadEditor').value);
+  } catch (e) {
+    alert('Invalid JSON: ' + e.message);
+    return;
+  }
+  const resp = await fetch(`/api/jobs/${jobId}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload }),
+  });
+  const data = await resp.json();
+  $('msg').textContent = resp.ok ? `submitted ${jobId}` : `error: ${JSON.stringify(data)}`;
+  setTimeout(() => { showDetail(jobId); refresh(); }, 800);
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
