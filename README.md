@@ -31,15 +31,61 @@ API (unmodified, from the assignment), the intake API, and the worker.
 
 ## Architecture
 
+**Auto submit** (`auto_submit=true`): a verified invoice is registered immediately, no human involved.
+
+```mermaid
+flowchart LR
+    UI["UI (browser)"]
+    API["API (FastAPI)"]
+    RMQ[["RabbitMQ"]]
+    C1["Worker 1"]
+    C2["Worker 2"]
+    C3["Worker N"]
+    PG[("Postgres")]
+    Acct[["Accounting API"]]
+
+    UI -- "1) upload file, auto_submit=true" --> API
+    API -- "2) enqueue job" --> RMQ
+    RMQ -- "3) deliver" --> C1
+    RMQ -- "3) deliver" --> C2
+    RMQ -- "3) deliver" --> C3
+
+    C1 -- "4) extract, hydrate, verify" --> PG
+    C2 -- "4)" --> PG
+    C3 -- "4)" --> PG
+
+    PG -- "5) verified -- register immediately" --> Acct
 ```
-upload -> API (FastAPI) -> Postgres (job row) -> RabbitMQ -> worker
-                                                                |
-                                          extract -> hydrate -> verify -> register
-                                          (mock)     (resolve   (math +    (POST
-                                                      partner/   duplicate  /invoices
-                                                      tax/date)  checks)    on the
-                                                                            accounting
-                                                                            API)
+
+If verification fails even with `auto_submit=true` (unresolved supplier, duplicate, math mismatch), there's nothing to auto-submit — that job falls back to the manual path instead of step 5.
+
+**Manual submit** (`auto_submit=false`, or verification failed): a human reviews/corrects the extracted fields before anything is registered.
+
+```mermaid
+flowchart LR
+    UI["UI (browser)"]
+    API["API (FastAPI)"]
+    RMQ[["RabbitMQ"]]
+    C1["Worker 1"]
+    C2["Worker 2"]
+    C3["Worker N"]
+    PG[("Postgres")]
+    Acct[["Accounting API"]]
+
+    UI -- "1) upload file, auto_submit=false" --> API
+    API -- "2) enqueue job" --> RMQ
+    RMQ -- "3) deliver" --> C1
+    RMQ -- "3) deliver" --> C2
+    RMQ -- "3) deliver" --> C3
+
+    C1 -- "4) extract, hydrate, verify -- status: verified / needs_review" --> PG
+    C2 -- "4)" --> PG
+    C3 -- "4)" --> PG
+
+    UI -- "5) poll job, read extracted fields" --> API
+    API -- "5) read" --> PG
+    UI -- "6) human reviews / corrects, clicks submit" --> API
+    API -- "7) submit approved data" --> Acct
 ```
 
 - **`accounting-api/`** — the mock accounting system from the assignment, unmodified.
