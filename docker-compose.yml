@@ -8,7 +8,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U invoices"]
       interval: 5s
@@ -72,6 +72,3 @@ services:
         condition: service_healthy
       accounting-api:
         condition: service_started
-
-volumes:
-  pgdata:
