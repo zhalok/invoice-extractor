@@ -5,6 +5,8 @@ them into the (mock) accounting system — with a human review step in
 between, since blind automation is exactly what almost caused a duplicate
 payment per the client's brief. See `SUBMISSION.md` for the full writeup.
 
+**Demo video:** https://youtu.be/BsikeXZiBuI
+
 ## Run it
 
 Requires Docker.
